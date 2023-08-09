@@ -29,10 +29,11 @@ if __name__ == "__main__":
 
   if option == 'cassie':
     from cassie.udp import run_udp
+    parser.add_argument("--policy", default="/home/xyz/projects/cassie_mujoco_rppo/LOG_DIRECTORY/curmodel/actor.pt", type=str)
+    policy_model = parser.parse_args()
+    # policies = sys.argv[1:]
 
-    policies = sys.argv[1:]
-
-    run_udp(policies)
+    run_udp(policy_model)
     exit()
 
   if option == 'extract':
@@ -102,6 +103,40 @@ if __name__ == "__main__":
 
     run_pca(model)
     exit()
+  elif option == 'sim':
+    import numpy as np
+    import torch
+    from cassie import *
+    from cassie.cassiemujoco import pd_in_t
 
+    parser.add_argument("--policy", default="/home/xyz/projects/cassie_mujoco_rppo/LOG_DIRECTORY/curmodel/actor.pt", type=str)
+    policy_model = parser.parse_args()
+    # load the ppo actor model
+    policy_model = torch.load(policy_model.policy)
+    policy_model.eval()
+
+    # create environment
+    env = CassieEnv()
+    env.render()
+    env.reset()
+    
+    u = pd_in_t()
+    observations_tensor = torch.Tensor(env.reset())
+    while True:
+        # print(env.phase)
+        observations_tensor = torch.Tensor(env.get_full_state())
+        if env.phase >= 28:
+          env.phase = 0
+          env.counter += 1
+        #break
+
+        with torch.no_grad():
+            actions = policy_model(observations_tensor)
+
+        action_val = actions.numpy().squeeze()
+
+        env.step_simulation(action_val)
+        env.sim.step_pd(env.u)
+        env.render()
   else:
     print("Invalid option '{}'".format(option))

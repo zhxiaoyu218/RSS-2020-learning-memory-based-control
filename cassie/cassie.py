@@ -12,9 +12,10 @@ import pickle
 
 class CassieEnv:
   def __init__(self, dynamics_randomization=False):
+    # print("12")
     self.sim = CassieSim("./cassie/cassiemujoco/cassie.xml")
     self.vis = None
-
+    
     self.dynamics_randomization = dynamics_randomization
 
     state_est_size = 46
@@ -302,11 +303,17 @@ class CassieEnv:
           self.cassie_state.joint.position[:],                                       # unactuated joint positions
           self.cassie_state.joint.velocity[:]                                        # unactuated joint velocities
       ])
-
       return np.concatenate([robot_state, ext_state])
 
   def render(self):
       if self.vis is None:
-          self.vis = CassieVis(self.sim, "./cassie/cassiemujoco/cassie.xml")
+        try:
+            self.vis = CassieVis(self.sim, "/home/xyz/projects/cassie_mujoco_rppo/cassie/cassiemujoco/cassie.xml")
+        except Exception as e:
+            print("Error initializing CassieVis:", e)
+            return
 
-      return self.vis.draw(self.sim)
+        try:
+            return self.vis.draw(self.sim)
+        except Exception as e:
+            print("Error drawing visualization:", e)

@@ -8,8 +8,8 @@ import datetime
 
 import select, termios, tty
 
-from cassie.cassiemujoco.cassieUDP import *
-from cassie.cassiemujoco.cassiemujoco_ctypes import *
+from .cassiemujoco import CassieUdp
+from .cassiemujoco.cassiemujoco_ctypes import *
 
 import numpy as np
 
@@ -90,13 +90,16 @@ def check_stdin():
   return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 def run_udp(args):
-  from util.env import env_factory
+  # from util.env import env_factory *************************************************************************************************************************
+  from util import env_factory
 
+  # policy = torch.load(args)*************************************************************************************************************************
   policy = torch.load(args.policy)
   #policy.eval()
 
   env = env_factory(policy.env_name)()
-  if not env.state_est:
+  # if not env.state_est:  *************************************************************************************************************************
+  if not env.cassie_state:
     print("This policy was not trained with state estimation and cannot be run on the robot.")
     raise RuntimeError
 
@@ -109,8 +112,9 @@ def run_udp(args):
   state_log  = [] # cassie state
   target_log = [] #PD target log
 
-  clock_based = env.clock
-  no_delta = env.no_delta
+  # clock_based = env.clock *************************************************************************************************************************
+  # no_delta = env.no_delta *************************************************************************************************************************
+  no_delta = env.offset
 
   u = pd_in_t()
   for i in range(5):
@@ -118,7 +122,7 @@ def run_udp(args):
       u.leftLeg.motorPd.dGain[i] = env.D[i]
       u.rightLeg.motorPd.pGain[i] = env.P[i]
       u.rightLeg.motorPd.dGain[i] = env.D[i]
-
+  print("** platform is ", platform.node())
   if platform.node() == 'cassie':
       cassie = CassieUdp(remote_addr='10.10.10.3', remote_port='25010',
                               local_addr='10.10.10.100', local_port='25011')
@@ -298,14 +302,17 @@ def run_udp(args):
           torch_state = torch.Tensor(RL_state)
           torch_state = policy.normalize_state(torch_state, update=False)
 
-          if no_delta:
-            offset = env.offset
-          else:
-            offset = env.get_ref_state(phase=phase)
+          # if no_delta.any():
+          #   offset = env.offset
+          # else:
+          #   offset = env.get_ref_state(phase=phase)
+          # offset = env.get_ref_state(phase=phase)
+
 
           action = policy(torch_state)
           env_action = action.data.numpy()
-          target = env_action + offset
+          target = env_action 
+          # target = env_action + offset
 
           # Send action
           for i in range(5):

@@ -18,6 +18,8 @@
 #define CASSIEMUJOCO_H
 
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "cassie_out_t.h"
 #include "cassie_in_t.h"
 #include "cassie_user_in_t.h"
@@ -34,11 +36,13 @@ typedef struct cassie_state cassie_state_t;
 extern "C" {
 #endif
 
+cassie_out_t cassie_sim_get_cassie_out(cassie_sim_t *c);
+
 // Pass a null-terminated string containing the path to the directory
 // containing cassie.xml, mjpro150/, mjkey.txt, etc. If NULL is
 // passed, the directory containing the current executable is used
 // instead. Returns true if loading was successful, false otherwise.
-bool cassie_mujoco_init(const char *basedir);
+bool cassie_mujoco_init(const char *modelfile);
 
 // Unloads the MuJoCo library and Cassie model. After calling this
 // function, cassie_mujoco_init can be called again.
@@ -49,10 +53,18 @@ void cassie_cleanup(void);
  * Cassie simulator functions
  ******************************************************************************/
 
+// Reloads the xml file used for the cassie mujoco model. Overwrites the
+// previously used model. Returns whether successful or not. This is used for overwriting
+// the global mjModel that all new cassie sim objects will use by default (reinit set to false)
+bool cassie_reload_xml(const char *modelfile);
+
 // Creates an instance of the Cassie simulator. If called before
 // cassie_mujoco_init, cassie_mujoco_init is called with the parameter
-// NULL.
-cassie_sim_t *cassie_sim_init(void);
+// NULL. The "reinit" arg allows for the created cassie sim object to use a
+// different mjModel than the global one loaded by cassie_mujoco_init. If reinit
+// is true, then a new mjModel is made using the inputted "modelfile" arg. Note that
+// in this case the global "initial_model" that is used by default is not changed.
+cassie_sim_t *cassie_sim_init(const char *modelfile, bool reinit);
 
 // Creates an instance of the Cassie simulator with the same state as
 // an existing instance.
@@ -63,6 +75,9 @@ void cassie_sim_copy(cassie_sim_t *dst, const cassie_sim_t *src);
 
 // Destroys an instance of the Cassie simulator.
 void cassie_sim_free(cassie_sim_t *sim);
+
+// Deletes the saved initial model
+void delete_init_model();
 
 // Simulates one step of the Cassie simulator at the lowest level of
 // input and output. Only one cassie_sim_step_* function should be
@@ -79,8 +94,18 @@ void cassie_sim_step(cassie_sim_t *sim, cassie_out_t *y, const cassie_user_in_t 
 // called on a given Cassie simulator instance.
 void cassie_sim_step_pd(cassie_sim_t *sim, state_out_t *y, const pd_in_t *u);
 
+void cassie_sim_step_pd_no2khz(cassie_sim_t *c, state_out_t *y, const pd_in_t *u);
+
+// Forward Integrate the position coordinate based on what is in qvel.
+// This takes 1/2000 sec steps. Adjust the "step size" by scaling velocity
+void cassie_integrate_pos(cassie_sim_t *c, state_out_t *y);
+
 // Returns a read-write pointer to the simulator time.
 double *cassie_sim_time(cassie_sim_t *sim);
+
+double *cassie_sim_timestep(cassie_sim_t *c);
+
+void cassie_sim_set_timestep(cassie_sim_t *c, double dt);
 
 // Returns a read-write pointer to the simulator joint positions.
 // The order of the values are as follows:
@@ -157,6 +182,13 @@ double *cassie_sim_qpos(cassie_sim_t *sim);
 // [31] Right foot            (Motor [9], Joint [5])
 double *cassie_sim_qvel(cassie_sim_t *sim);
 
+// Returns a read-write pointer to the simulator joint velocities.
+// Order of the values are the same as qvel
+double *cassie_sim_qacc(cassie_sim_t *c);
+
+// Returns a read-write pointer to the simulator actuated motors.
+double *cassie_sim_ctrl(cassie_sim_t *sim);
+
 // Returns the mjModel* used by the simulator
 void *cassie_sim_mjmodel(cassie_sim_t *sim);
 
@@ -174,12 +206,61 @@ bool cassie_sim_check_self_collision(const cassie_sim_t *sim);
 // Returns the contact forces on the left and right feet
 // cfrc[0-2]:  Contact force acting on the left foot, in world coordinates
 // cfrc[3-5]:  Currently zero, reserved for torque acting on the left foot
-// cfrc[6-8]:  Contact force acting on the left foot, in world coordinates
+// cfrc[6-8]:  Contact force acting on the right foot, in world coordinates
 // cfrc[9-11]: Currently zero, reserved for torque acting on the right foot
 void cassie_sim_foot_forces(const cassie_sim_t *c, double cfrc[12]);
 
+// Returns the contact forces on the left and right toes and heels.
+// toe_force[0-2]:  Contact force acting on the left toe, in world coordinates
+// toe_force[3-5]:  Contact force acting on the right toe, in world coordinates
+// heel_force[6-8]:  Contact force acting on the left heel, in world coordinates
+// heel_force[9-11]: Contact force acting on the right heel, in world coordinates
+void cassie_sim_heeltoe_forces(const cassie_sim_t *c, double toe_force[6], double heel_force[6]);
+
+// Returns whether or not Cassie is colliding with a geom in the inputted group
+bool cassie_sim_geom_collision(const cassie_sim_t *c, int geom_group);
+
+// Returns CoM velocities of the feet. Returns 12 long array, with 6 values for
+// each foot (left then right) in order of 3D rotation and then 3D translation
+void cassie_sim_foot_velocities(const cassie_sim_t *c, double cvel[12]);
+
+// Returns the CoM position of the entire robot in the world frame
+// (technically the subtree center of mass from the pelvis). [m]
+void cassie_sim_cm_position(const cassie_sim_t *c, double cm_pos[3]);
+
+// Returns the CoM velocity of the entire robot in the world frame
+// (technically the subtree center of mass from the pelvis). [m/s]
+void cassie_sim_cm_velocity(const cassie_sim_t *c, double cm_vel[3]);
+
+// Returns 3x3 rotational intertia matrix of the robot around its center
+// of mass in the pelvis frame. [kg*m^2]
+void cassie_sim_centroid_inertia(const cassie_sim_t *c, double Icm[9]);
+
+// Return the angular momentum of the robot in the world frame.
+void cassie_sim_angular_momentum(const cassie_sim_t *c, double Lcm[3]);
+
+// Return the full 32x32 mass matrix of Cassie.
+void cassie_sim_full_mass_matrix(const cassie_sim_t *c, double M[1024]);
+
+// Return the minimal actuated mass matrix of Cassie. Contains 6 for floating
+// base, 5 for left leg motors, 5 for right leg motors.
+void cassie_sim_minimal_mass_matrix(const cassie_sim_t *c, double M[256]);
+
+// Return the conrod closed loop constraint jacobian and constraint violation (error) vectors
+void cassie_sim_loop_constraint_info(const cassie_sim_t *c, double J_cl[192], double err_cl[6]);
+
+// Returns CoM velocities of the inputted body specified by the input string.
+// Returns 6 long array, with 6 values for each foot (left then right) in order of 3D rotation and then 3D translation
+void cassie_sim_body_velocities(const cassie_sim_t *c, double cvel[6], const char* name);
+
+// Body accelerations
+void cassie_sim_body_acceleration(const cassie_sim_t *c, double accel[6], const char* name);
+
+// Body contact force in global frame
+void cassie_sim_body_contact_force(const cassie_sim_t *c, double cfrc[6], const char* name);
+
 // Applies an external force to a specified body.
-void cassie_sim_apply_force(cassie_sim_t *sim, double xfrc[6], int body);
+void cassie_sim_apply_force(cassie_sim_t *sim, double xfrc[6], const char* name);
 
 // Sets all external forces to zero.
 void cassie_sim_clear_forces(cassie_sim_t *sim);
@@ -195,6 +276,69 @@ void cassie_sim_release(cassie_sim_t *sim);
 // to enable the motors, which is the default state.
 void cassie_sim_radio(cassie_sim_t *sim, double channels[16]);
 
+// Does a "full reset", i.e. sets qpos to a starting position and zeros
+// out all other data used for computation (like velocities, accelerations, forces)
+void cassie_sim_full_reset(cassie_sim_t *sim);
+
+void reset_state_est(cassie_sim_t *c, state_out_t *y);
+
+double* cassie_sim_xpos(cassie_sim_t *c, const char* name);
+
+double* cassie_sim_xquat(cassie_sim_t *c, const char* name);
+
+void cassie_sim_foot_orient(const cassie_sim_t *c, double corient[4]);
+
+void cassie_sim_set_geom_name_quat(cassie_sim_t *c, const char* name, double *quat);
+
+void cassie_sim_set_geom_name_friction(cassie_sim_t *c, const char* name, double *fric);
+
+double *cassie_sim_get_geom_name_friction(cassie_sim_t *c, const char* name);
+
+void cassie_sim_set_geom_name_pos(cassie_sim_t *c, const char* name, double *pos);
+
+double *cassie_sim_geom_name_pos(cassie_sim_t *c, const char* name);
+
+void cassie_sim_set_body_name_mass(cassie_sim_t *c, const char* name, double mass);
+
+void cassie_sim_set_body_name_pos(cassie_sim_t *c, const char* name, double *data);
+
+double* cassie_sim_get_body_name_pos(cassie_sim_t *c, const char* name);
+
+int cassie_sim_get_joint_num_dof(cassie_sim_t *c, const char* name);
+
+double* cassie_sim_site_xpos(cassie_sim_t *c, const char* name);
+
+void cassie_sim_site_xquat(cassie_sim_t *c, const char* name, double* xquat);
+
+void cassie_sim_relative_pose(double pos1[3], double quat1[4],
+                              double pos2[3], double quat2[4],
+                              double pos2_in_pos1[3],double quat2_in_quat1[4]);
+
+int cassie_sim_get_hfield_nrow(cassie_sim_t *c);
+
+int cassie_sim_get_hfield_ncol(cassie_sim_t *c);
+
+int cassie_sim_get_nhfielddata(cassie_sim_t *c);
+
+double* cassie_sim_get_hfield_size(cassie_sim_t *c);
+
+void cassie_sim_set_hfield_size(cassie_sim_t *c, double size[4]);
+
+float* cassie_sim_hfielddata(cassie_sim_t *c);
+
+void cassie_sim_set_hfielddata(cassie_sim_t *c, float* data);
+
+void cassie_vis_set_cam(cassie_vis_t* v, const char* body_name, double zoom, double azi, double elev);
+
+void cassie_vis_set_cam_pos(cassie_vis_t* v, double* look_point, double distance, double azi, double elev);
+
+void cassie_sim_get_jacobian(cassie_sim_t *c, double *jac, const char* name);
+
+void cassie_sim_get_jacobian_full(cassie_sim_t *c, double *jac, double *jac_rot, const char* name);
+
+void cassie_sim_get_jacobian_full_site(cassie_sim_t *c, double *jac, double *jac_rot, const char* name);
+
+void cassie_sim_just_set_const(cassie_sim_t *c);
 
 /*******************************************************************************
  * Cassie visualizer functions
@@ -203,7 +347,7 @@ void cassie_sim_radio(cassie_sim_t *sim, double channels[16]);
 // Creates an instance of the Cassie simulation visualizer. If called
 // before cassie_mujoco_init, cassie_mujoco_init is called with the
 // parameter NULL.
-cassie_vis_t *cassie_vis_init(void);
+cassie_vis_t *cassie_vis_init(cassie_sim_t *sim, const char* modelfile, bool offscreen);
 
 // Closes the visualization window without freeing the instance. After
 // calling this, cassie_vis_draw can still be called, but the
@@ -216,8 +360,71 @@ void cassie_vis_free(cassie_vis_t *vis);
 // Visualizes the state of the given Cassie simulator.
 bool cassie_vis_draw(cassie_vis_t *vis, cassie_sim_t *sim);
 
+// Resize the visualization window
+void cassie_vis_window_resize(cassie_vis_t *vis, int width, int height);
+
 // Returns true if the visualizer has been closed but not freed.
 bool cassie_vis_valid(cassie_vis_t *vis);
+
+// Returns value of vis->paused
+bool cassie_vis_paused(cassie_vis_t *vis);
+
+// Returns value of vis->slowmotion
+bool cassie_vis_slowmo(cassie_vis_t *vis);
+
+// add a spherical marker for visualization purposes into scene.
+void cassie_vis_add_marker(cassie_vis_t* v, double pos[3], double size[3], double rgba[4], double so3[9]);
+
+// remove a visualization marker
+void cassie_vis_remove_marker(cassie_vis_t* v, int id);
+
+// remove all visualization markers
+void cassie_vis_clear_markers(cassie_vis_t* v);
+
+// update existing marker
+void cassie_vis_update_marker_pos(cassie_vis_t* v, int id, double pos[3]);
+void cassie_vis_update_marker_size(cassie_vis_t* v, int id, double size[3]);
+void cassie_vis_update_marker_rgba(cassie_vis_t* v, int id, double rgba[4]);
+void cassie_vis_update_marker_orient(cassie_vis_t* v, int id, double so3[9]);
+
+// Apply inputted perturbation to any body in the vis's mjData
+void cassie_vis_apply_force(cassie_vis_t *vis, double xfrc[6], const char* name);
+
+// Does a "full reset", i.e. sets qpos to a starting position and zeros
+// out all other data used for computation (like velocities, accelerations, forces)
+void cassie_vis_full_reset(cassie_vis_t *sim);
+
+// Remake the visualized mjvScene and mjrContext. Used to update cassie_vis_t
+// after some change has been made to the underlying model.
+void cassie_vis_remakeSceneCon(cassie_vis_t *v);
+
+// Set height field data for vis model
+void cassie_vis_set_hfielddata(cassie_vis_t *v, float* data);
+
+float* cassie_vis_hfielddata(cassie_vis_t *c);
+
+// Set the visualization camera to track the inputted body (specified by a string matching the name of a body defined
+// in the XML model file). Also takes in as input a zoom level as well as a azimuth and elevation value controlling
+// the angle of the camera.
+void cassie_vis_set_cam(cassie_vis_t* v, const char* body_name, double zoom, double azi, double elev);
+
+// initialize a video renderer
+void cassie_vis_init_recording(cassie_vis_t *sim, const char* videofile, int width, int height);
+
+//Record Current frame
+void cassie_vis_record_frame(cassie_vis_t *sim);
+
+// close a video renderer
+void cassie_vis_close_recording(cassie_vis_t *sim);
+
+// Depth Functions
+void cassie_vis_init_depth(cassie_vis_t *v, int width, int height);
+
+void cassie_vis_init_rgb(cassie_vis_t *v, int width, int height);
+
+float* cassie_vis_draw_depth(cassie_vis_t *v, cassie_sim_t *c, int width, int height);
+
+unsigned char* cassie_vis_get_rgb(cassie_vis_t *v, cassie_sim_t *c, int width, int height);
 
 
 /*******************************************************************************

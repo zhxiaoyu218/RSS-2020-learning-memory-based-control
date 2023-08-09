@@ -49,8 +49,10 @@ def create_logger(args):
   return logger
 
 def train_normalizer(policy, min_timesteps, max_traj_len=1000, noise=0.5):
+  # print("10")
   with torch.no_grad():
     env = env_factory(policy.env_name)()
+    
     env.dynamics_randomization = False
 
     total_t = 0
@@ -70,8 +72,9 @@ def train_normalizer(policy, min_timesteps, max_traj_len=1000, noise=0.5):
 
 def eval_policy(model, env=None, episodes=5, max_traj_len=400, verbose=True, visualize=False):
   if env is None:
+    print("11")
     env = env_factory(False)()
-
+  
   if model.nn_type == 'policy':
     policy = model
   elif model.nn_type == 'extractor':
@@ -125,4 +128,5 @@ def env_factory(dynamics_randomization, verbose=False, **kwargs):
     if verbose:
       print("Created cassie env with arguments:")
       print("\tdynamics randomization: {}".format(dynamics_randomization))
+    # print("11")
     return partial(CassieEnv, dynamics_randomization=dynamics_randomization)

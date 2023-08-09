@@ -17,5 +17,21 @@ class CassieTrajectory:
         self.mpos = data[:, 78:88]
         self.mvel = data[:, 88:98]
 
+    def state(self, t):
+        tmax = self.time[-1]
+
+        i = int((t % tmax) / tmax * len(self.time))
+
+        return (self.qpos[i], self.qvel[i])
+
+    def action(self, t):
+        tmax = self.time[-1]
+        i = int((t % tmax) / tmax * len(self.time))
+        return (self.mpos[i], self.mvel[i], self.torque[i])
+
+    def sample(self):
+        i = random.randrange(len(self.time))
+        return (self.time[i], self.qpos[i], self.qvel[i])
+
     def __len__(self):
         return len(self.time)
