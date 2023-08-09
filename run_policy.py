@@ -1,8 +1,13 @@
 import numpy as np
+
+import sys, argparse, time, os
+
 import torch
 from cassie import *
 from cassie.cassiemujoco import pd_in_t
 
+
+parser = argparse.ArgumentParser()
 parser.add_argument("--policy", default="/home/xyz/projects/cassie_mujoco_rppo/LOG_DIRECTORY/curmodel/actor.pt", type=str)
 policy_model = parser.parse_args()
 # load the ppo actor model
